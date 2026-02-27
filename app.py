@@ -78,9 +78,7 @@ def main():
             "4) Click **Upload metadatas**"
         )
 
-    # -----------------------------
-    # Keep colleague’s content / text
-    # -----------------------------
+
     st.title("EU Fact Force - Article uploading page")
     st.write("## Welcome to EU Fact Force articles uploading pages")
     st.write("")
