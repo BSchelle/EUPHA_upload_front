@@ -8,5 +8,6 @@ dependencies = [
     "fitz>=0.0.1.dev2",
     "pdfplumber>=0.11.8",
     "pymupdf>=1.26.5",
+    "pytest>=8.4.2",
     "streamlit>=1.50.0",
 ]
