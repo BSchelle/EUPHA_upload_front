@@ -1,0 +1,33 @@
+name: Python CI with uv
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. Installer uv
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          # Active le cache automatique pour accélérer les futurs runs
+          enable-cache: true
+          version: "latest"
+
+      # 2. Installer Python (uv s'en occupe tout seul via le .python-version)
+      - name: Set up Python
+        run: uv python install 3.12
+
+      # 3. Installer les dépendances
+      # Si tu as un uv.lock, utilise 'uv sync'. Sinon 'uv pip install'
+      - name: Install dependencies
+        run: |
+          uv sync --frozen # Utilise cette commande si tu as un fichier uv.lock
+
+      # 4. Exécuter les tests via 'uv run'
+      - name: Run tests
+        run: uv run pytest
+
