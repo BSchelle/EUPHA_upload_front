@@ -7,11 +7,19 @@ from typing import Optional
 import re
 import io
 import fitz  # PyMuPDF
-import pdfplumber
-
+import json
+import uuid
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
+def load_svg_as_data_uri(svg_path: str) -> Optional[str]:
+    """Return a data URI for an SVG file, or None if not found."""
+    try:
+        with open(svg_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+        return f"data:image/svg+xml;base64,{b64}"
+    except FileNotFoundError:
+        return None
 
 def extract_doi_from_pdf(text: str) -> Optional[str]:
     """Extract DOI from PDF text using regex pattern."""
@@ -39,7 +47,6 @@ def extract_abstract_from_pdf(text: str) -> Optional[str]:
         abstract_text = re.sub(r'\s+', ' ', abstract_text)[:500]
         return abstract_text if len(abstract_text) > 20 else None
     return None
-
 
 def extract_authors_from_pdf(text: str) -> list[dict]:
     """Extract authors by finding the typical author line in scientific papers."""
@@ -115,18 +122,14 @@ def extract_text_by_blocks(uploaded_file_bytes) -> str:
     for page in doc[:3]:
         # Trie les blocs par position verticale puis horizontale
         blocks = page.get_text("blocks")
-        blocks.sort(key=lambda b: (round(b[1] / 20), b[0]))  # y groupé, puis x
+        blocks.sort(key=lambda b: (round(b[1] / 20), b[0]))
         for block in blocks:
             full_text += block[4] + "\n"
     return full_text
+
 def extract_pdf_metadata(uploaded_file) -> dict:
     """Extract metadata from PDF file."""
-    metadata = {
-        "doi": None,
-        "abstract": None,
-        "authors": []
-    }
-
+    metadata = {"doi": None, "abstract": None, "authors": []}
     try:
         # Extract text from PDF
         pdf_text = extract_text_by_blocks(uploaded_file.read())
@@ -140,46 +143,112 @@ def extract_pdf_metadata(uploaded_file) -> dict:
         print(f"Error processing PDF: {e}")
     return metadata
 
-app.layout = dbc.Container([
-    dcc.Store(id='session-store', data={}), # Remplace st.session_state
+# --- LAYOUT COMPONENTS ---
 
-    html.H1("EU Fact Force - Article uploading page"),
+logo_uri = load_svg_as_data_uri("eupha-logo.svg")
 
-    dcc.Upload(
-        id='upload-pdf',
-        children=html.Div(['Glissez-déposez ou ', html.A('Sélectionnez un PDF')]),
-        style={'width': '100%', 'height': '60px', 'lineHeight': '60px', 'borderWidth': '1px', 'borderStyle': 'dashed', 'textAlign': 'center'}
-    ),
+sidebar = html.Div(
+    [
+        html.Img(src=logo_uri, style={"width": "100%", "maxWidth": "220px", "height": "auto", "display": "block", "margin": "8px auto 20px auto"}) if logo_uri else html.Div(),
+        html.H3("EU Fact Force", className="text-center font-weight-bold"),
+        html.Hr(),
+        html.H5("How it works", className="mb-3 font-weight-bold"),
+        html.Ol([
+            html.Li("Upload a PDF"),
+            html.Li("Validate DOI + abstract"),
+            html.Li("Validate authors"),
+            html.Li("Click Upload file")
+        ], className="pl-3")
+    ],
+    style={
+        "padding": "2rem 1rem",
+        "backgroundColor": "#f8f9fa",
+        "height": "100vh",
+        "position": "fixed",
+        "top": 0,
+        "left": 0,
+        "width": "25%",
+        "borderRight": "1px solid #dee2e6"
+    }
+)
 
-    html.Hr(),
-    dbc.Row([
-        dbc.Col([
-            dbc.Label("DOI"),
-            dbc.Input(id='input-doi', type='text'),
-            dbc.Label("Abstract"),
-            dbc.Textarea(id='input-abstract', style={'height': 150}),
-            dbc.Checkbox(id='chk-meta-correct', label="Informations correctes"),
-        ], width=6)
-    ]),
+main_content = html.Div(
+    [
+        html.H1("EU Fact Force - Article uploading page", className="mb-2"),
+        html.H3("Welcome to EU Fact Force articles uploading pages", className="text-muted mb-4"),
+        html.P("Thank you for collaborating with us, you will find here a page where you can upload and declare authors of your papers in attempt to build a safer and healthier community! Thank you for your contribution!"),
 
-    html.Hr(),
-    html.H3("Authors"),
-    html.Div(id='authors-container'), # Ici s'afficheront les auteurs
-    dbc.Button("➕ Add an author", id='btn-add-author', n_clicks=0, color="info", className="mt-2"),
+        dbc.Card([
+            dbc.CardBody([
+                html.H4("Upload & Metadatas", className="card-title font-weight-bold mb-4"),
+                dcc.Upload(
+                    id='upload-pdf',
+                    children=html.Div(['Drop your article here or ', html.A('Select a PDF', className="font-weight-bold")]),
+                    style={
+                        'width': '100%', 'height': '80px', 'lineHeight': '80px',
+                        'borderWidth': '2px', 'borderStyle': 'dashed', 'borderColor': '#adb5bd',
+                        'textAlign': 'center', 'borderRadius': '10px', 'marginBottom': '20px',
+                        'backgroundColor': '#f8f9fa', 'cursor': 'pointer'
+                    }
+                ),
+                html.H5("General informations", className="mt-4 font-weight-bold"),
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Label("Please share DOI"),
+                        dbc.Input(id='input-doi', type='text', placeholder="ex: 10.1038/s41586-021-00000-x"),
+                        dbc.Label("Please share your abstract", className="mt-3"),
+                        dbc.Textarea(id='input-abstract', style={'height': 150}, placeholder="Lorem ipsum dolor sit amet"),
+                        dbc.Checkbox(id='chk-meta-correct', label="This information is correct", className="mt-3 font-weight-bold text-success"),
+                    ], width=12)
+                ]),
+            ])
+        ], className="mb-4 shadow-sm", style={"borderRadius": "16px"}),
 
-    html.Hr(),
-    dbc.Button("Upload file", id='btn-final-upload', color="primary", size="lg"),
-    html.Div(id='final-output', className="mt-4")
-], fluid=True)
+        dbc.Card([
+            dbc.CardBody([
+                html.H4("Authors", className="card-title font-weight-bold mb-4"),
+                html.Div(id='authors-container'),
+                dbc.Button("➕ Add an author", id='btn-add-author', n_clicks=0, color="info", outline=True, className="mt-3"),
+                html.Br(),
+                dbc.Checkbox(id='chk-authors-correct', label="Authors information is correct", className="mt-3 font-weight-bold text-success"),
+            ])
+        ], className="mb-4 shadow-sm", style={"borderRadius": "16px"}),
+
+        dbc.Button("Upload file", id='btn-final-upload', color="primary", size="lg", className="w-100 mb-4"),
+        html.Div(id='final-output', className="mt-4 pb-5")
+    ],
+    style={"marginLeft": "25%", "padding": "2rem 3rem", "maxWidth": "1200px"}
+)
+
+app.layout = html.Div([
+    dcc.Store(id='session-store', data={}),
+    sidebar,
+    main_content
+], style={"fontFamily": "system-ui, -apple-system, sans-serif"})
+
+
+def creer_ligne_auteur(index, name="", surname="", email=""):
+    return dbc.Card([
+        dbc.CardBody([
+            dbc.Row([
+                dbc.Col(dbc.Input(id={'type': 'auth-name', 'index': index}, value=name, placeholder="Name"), width=3),
+                dbc.Col(dbc.Input(id={'type': 'auth-surname', 'index': index}, value=surname, placeholder="Surname"), width=4),
+                dbc.Col(dbc.Input(id={'type': 'auth-email', 'index': index}, value=email, placeholder="Email (Corresponding)"), width=4),
+                dbc.Col(dbc.Button("Remove", id={'type': 'remove-author', 'index': index}, color="danger", outline=True, className="w-100"), width=1)
+            ], className="align-items-center")
+        ], className="p-2")
+    ], className="mb-3 border-light shadow-sm")
+
+
+# --- CALLBACKS ---
 
 @app.callback(
     Output('input-doi', 'value'),
     Output('input-abstract', 'value'),
     Output('session-store', 'data'),
-    Input('upload-pdf', 'contents'),
-    State('upload-pdf', 'filename')
+    Input('upload-pdf', 'contents')
 )
-def handle_pdf_upload(contents, filename):
+def handle_pdf_upload(contents):
     if contents is None:
         return dash.no_update, dash.no_update, {}
 
@@ -195,32 +264,72 @@ def handle_pdf_upload(contents, filename):
 @app.callback(
     Output('authors-container', 'children'),
     Input('btn-add-author', 'n_clicks'),
-    Input('session-store', 'data'), # Déclenché quand le PDF est lu
-    State('authors-container', 'children')
+    Input({'type': 'remove-author', 'index': ALL}, 'n_clicks'),
+    Input('session-store', 'data'),
+    State({'type': 'auth-name', 'index': ALL}, 'value'),
+    State({'type': 'auth-surname', 'index': ALL}, 'value'),
+    State({'type': 'auth-email', 'index': ALL}, 'value'),
+    State({'type': 'auth-name', 'index': ALL}, 'id'),
 )
-def update_authors_list(n_clicks, metadata, current_children):
-    triggered_id = ctx.triggered_id
-    new_children = current_children or []
+def update_authors_list(add_clicks, remove_clicks, metadata, names, surnames, emails, ids):
+    triggered = ctx.triggered_id
 
-    # Si on vient de charger un PDF : on génère les lignes d'auteurs
-    if triggered_id == 'session-store' and metadata:
+    # On new PDF load
+    if triggered == 'session-store' and metadata:
         authors = metadata.get('authors', [])
-        return [creer_ligne_auteur(i, a['name'], a['surname']) for i, a in enumerate(authors)]
+        return [creer_ligne_auteur(str(uuid.uuid4()), a.get('name', ''), a.get('surname', ''), a.get('email', '')) for a in authors]
 
-    # Si on clique sur "Ajouter"
-    if triggered_id == 'btn-add-author':
-        new_index = len(new_children)
-        new_children.append(creer_ligne_auteur(new_index))
+    # Reconstruct current list of authors from states
+    current_authors = []
+    if ids:
+        for idx_id, name, surname, email in zip(ids, names, surnames, emails):
+            current_authors.append({
+                'index': idx_id['index'],
+                'name': name or "",
+                'surname': surname or "",
+                'email': email or ""
+            })
 
-    return new_children
+    if triggered == 'btn-add-author':
+        current_authors.append({
+            'index': str(uuid.uuid4()),
+            'name': "",
+            'surname': "",
+            'email': ""
+        })
 
-def creer_ligne_auteur(index, name="", surname=""):
-    return dbc.Card([
-        dbc.Row([
-            dbc.Col(dbc.Input(id={'type': 'auth-name', 'index': index}, value=name), width=6),
-            dbc.Col(dbc.Input(id={'type': 'auth-surname', 'index': index}, value=surname), width=6),
-        ])
-    ], className="mb-2 p-2")
+    if isinstance(triggered, dict) and triggered.get('type') == 'remove-author':
+        remove_index = triggered.get('index')
+        current_authors = [a for a in current_authors if a['index'] != remove_index]
+
+    return [creer_ligne_auteur(a['index'], a['name'], a['surname'], a['email']) for a in current_authors]
+
+
+@app.callback(
+    Output('input-doi', 'disabled'),
+    Output('input-abstract', 'disabled'),
+    Input('chk-meta-correct', 'value')
+)
+def lock_metadata(is_correct):
+    return bool(is_correct), bool(is_correct)
+
+
+@app.callback(
+    Output({'type': 'auth-name', 'index': ALL}, 'disabled'),
+    Output({'type': 'auth-surname', 'index': ALL}, 'disabled'),
+    Output({'type': 'auth-email', 'index': ALL}, 'disabled'),
+    Output({'type': 'remove-author', 'index': ALL}, 'disabled'),
+    Output('btn-add-author', 'disabled'),
+    Input('chk-authors-correct', 'value'),
+    State({'type': 'auth-name', 'index': ALL}, 'id')
+)
+def lock_authors(is_correct, ids):
+    is_corr = bool(is_correct)
+    if not ids:
+        return [], [], [], [], is_corr
+    length = len(ids)
+    return [is_corr]*length, [is_corr]*length, [is_corr]*length, [is_corr]*length, is_corr
+
 
 @app.callback(
     Output('final-output', 'children'),
@@ -229,14 +338,14 @@ def creer_ligne_auteur(index, name="", surname=""):
     State('input-abstract', 'value'),
     State({'type': 'auth-name', 'index': ALL}, 'value'),
     State({'type': 'auth-surname', 'index': ALL}, 'value'),
+    State({'type': 'auth-email', 'index': ALL}, 'value'),
     prevent_initial_call=True
 )
-def finalize_and_display_json(n_clicks, doi, abstract, names, surnames):
-    import json
+def finalize_and_display_json(n_clicks, doi, abstract, names, surnames, emails):
 
     authors_list = [
-        {"name": n, "surname": s}
-        for n, s in zip(names, surnames) if n or s
+        {"name": n, "surname": s, "email": e}
+        for n, s, e in zip(names, surnames, emails) if n or s
     ]
 
     metadata_json = {
@@ -246,10 +355,10 @@ def finalize_and_display_json(n_clicks, doi, abstract, names, surnames):
     }
 
     return html.Div([
+        dbc.Alert("Successfully contributed, thank you!", color="success"),
         html.H4("Metadata JSON"),
-        html.Pre(json.dumps(metadata_json, indent=4), style={'backgroundColor': '#f8f9fa', 'padding': '10px'}),
-        html.H4("Authors JSON", className="mt-3")
-        ])
+        html.Pre(json.dumps(metadata_json, indent=4), style={'backgroundColor': '#f8f9fa', 'padding': '15px', 'borderRadius': '8px', 'border': '1px solid #dee2e6'})
+    ])
 
 
 if __name__ == '__main__':
