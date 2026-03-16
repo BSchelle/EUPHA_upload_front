@@ -1,13 +1,16 @@
 from __future__ import annotations
-
+import dash  # L'import de la vraie librairie
+from dash import dcc, html, Input, Output, State, ALL, ctx
+import dash_bootstrap_components as dbc
 import base64
 from typing import Optional
 import re
 import io
 import fitz  # PyMuPDF
-import streamlit as st
-import pdfplumber
+import json
+import uuid
 
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 def load_svg_as_data_uri(svg_path: str) -> Optional[str]:
     """Return a data URI for an SVG file, or None if not found."""
@@ -18,7 +21,6 @@ def load_svg_as_data_uri(svg_path: str) -> Optional[str]:
     except FileNotFoundError:
         return None
 
-
 def extract_doi_from_pdf(text: str) -> Optional[str]:
     """Extract DOI from PDF text using regex pattern."""
     # Pattern for DOI: 10.xxxx/xxxxx
@@ -26,7 +28,7 @@ def extract_doi_from_pdf(text: str) -> Optional[str]:
     match = re.search(r'(?:doi[:\s]+)?(?:https?://)?(?:dx\.)?doi\.org/(10\.\S+)', text, re.IGNORECASE)
     if match:
         return match.group(1) if match.group(1).startswith('10.') else match.group(0)
-    
+
     # Alternative pattern
     match = re.search(r'10\.\d{4,}/\S+', text)
     if match:
@@ -70,7 +72,7 @@ def extract_authors_from_pdf(text: str) -> list[dict]:
         if not re.match(r'^[A-Z]', line):
             continue
         # Ne doit pas contenir de mots typiques de non-auteurs
-        skip_words = ['abstract', 'keywords', 'introduction', 'figure', 
+        skip_words = ['abstract', 'keywords', 'introduction', 'figure',
                       'table', 'doi', 'http', 'university', 'institute',
                       'open access', 'copyright', 'license', 'received']
         if any(w in line.lower() for w in skip_words):
@@ -121,313 +123,244 @@ def extract_text_by_blocks(uploaded_file_bytes) -> str:
     for page in doc[:3]:
         # Trie les blocs par position verticale puis horizontale
         blocks = page.get_text("blocks")
-        blocks.sort(key=lambda b: (round(b[1] / 20), b[0]))  # y groupé, puis x
+        blocks.sort(key=lambda b: (round(b[1] / 20), b[0]))
         for block in blocks:
             full_text += block[4] + "\n"
     return full_text
+
 def extract_pdf_metadata(uploaded_file) -> dict:
     """Extract metadata from PDF file."""
-    metadata = {
-        "doi": None,
-        "abstract": None,
-        "authors": []
-    }
-    
+    metadata = {"doi": None, "abstract": None, "authors": []}
     try:
         # Extract text from PDF
         pdf_text = extract_text_by_blocks(uploaded_file.read())
 
-        st.write(pdf_text)
         # Extract metadata
         metadata["doi"] = extract_doi_from_pdf(pdf_text)
         metadata["abstract"] = extract_abstract_from_pdf(pdf_text)
         metadata["authors"] = extract_authors_from_pdf(pdf_text)
-        
+
     except Exception as e:
-        st.warning(f"Could not extract metadata from PDF: {str(e)}")
-    
+        print(f"Error processing PDF: {e}")
     return metadata
 
+# --- LAYOUT COMPONENTS ---
 
-def set_modern_css() -> None:
-    st.markdown(
-        """
-        <style>
-          .block-container { padding-top: 1.2rem; padding-bottom: 2.2rem; max-width: 1050px; }
+logo_uri = load_svg_as_data_uri("eupha-logo.svg")
 
-          .card {
-            background: rgba(255,255,255,0.78);
-            border: 1px solid rgba(0,0,0,0.06);
-            border-radius: 16px;
-            padding: 16px 16px;
-            box-shadow: 0 10px 26px rgba(0,0,0,0.06);
-          }
+sidebar = html.Div(
+    [
+        html.Img(src=logo_uri, style={"width": "100%", "maxWidth": "220px", "height": "auto", "display": "block", "margin": "8px auto 20px auto"}) if logo_uri else html.Div(),
+        html.H3("EU Fact Force", className="text-center font-weight-bold"),
+        html.Hr(),
+        html.H5("How it works", className="mb-3 font-weight-bold"),
+        html.Ol([
+            html.Li("Upload a PDF"),
+            html.Li("Validate DOI + abstract"),
+            html.Li("Validate authors"),
+            html.Li("Click Upload file")
+        ], className="pl-3")
+    ],
+    style={
+        "padding": "2rem 1rem",
+        "backgroundColor": "#f8f9fa",
+        "height": "100vh",
+        "position": "fixed",
+        "top": 0,
+        "left": 0,
+        "width": "25%",
+        "borderRight": "1px solid #dee2e6"
+    }
+)
 
-          .sidebar-logo { margin-top: 8px; margin-bottom: 6px; display:block; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+main_content = html.Div(
+    [
+        html.H1("EU Fact Force - Article uploading page", className="mb-2"),
+        html.H3("Welcome to EU Fact Force articles uploading pages", className="text-muted mb-4"),
+        html.P("Thank you for collaborating with us, you will find here a page where you can upload and declare authors of your papers in attempt to build a safer and healthier community! Thank you for your contribution!"),
 
+        dbc.Card([
+            dbc.CardBody([
+                html.H4("Upload & Metadatas", className="card-title font-weight-bold mb-4"),
+                dcc.Upload(
+                    id='upload-pdf',
+                    children=html.Div(['Drop your article here or ', html.A('Select a PDF', className="font-weight-bold")]),
+                    style={
+                        'width': '100%', 'height': '80px', 'lineHeight': '80px',
+                        'borderWidth': '2px', 'borderStyle': 'dashed', 'borderColor': '#adb5bd',
+                        'textAlign': 'center', 'borderRadius': '10px', 'marginBottom': '20px',
+                        'backgroundColor': '#f8f9fa', 'cursor': 'pointer'
+                    }
+                ),
+                html.H5("General informations", className="mt-4 font-weight-bold"),
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Label("Please share DOI"),
+                        dbc.Input(id='input-doi', type='text', placeholder="ex: 10.1038/s41586-021-00000-x"),
+                        dbc.Label("Please share your abstract", className="mt-3"),
+                        dbc.Textarea(id='input-abstract', style={'height': 150}, placeholder="Lorem ipsum dolor sit amet"),
+                        dbc.Checkbox(id='chk-meta-correct', label="This information is correct", className="mt-3 font-weight-bold text-success"),
+                    ], width=12)
+                ]),
+            ])
+        ], className="mb-4 shadow-sm", style={"borderRadius": "16px"}),
 
-def main():
-    # Page config must be first
-    st.set_page_config(page_title="EU Fact Force uploading hub", page_icon="📄", layout="wide")
-    set_modern_css()
+        dbc.Card([
+            dbc.CardBody([
+                html.H4("Authors", className="card-title font-weight-bold mb-4"),
+                html.Div(id='authors-container'),
+                dbc.Button("➕ Add an author", id='btn-add-author', n_clicks=0, color="info", outline=True, className="mt-3"),
+                html.Br(),
+                dbc.Checkbox(id='chk-authors-correct', label="Authors information is correct", className="mt-3 font-weight-bold text-success"),
+            ])
+        ], className="mb-4 shadow-sm", style={"borderRadius": "16px"}),
 
-    # Session init
-    if "auteurs" not in st.session_state:
-        st.session_state.auteurs = []
+        dbc.Button("Upload file", id='btn-final-upload', color="primary", size="lg", className="w-100 mb-4"),
+        html.Div(id='final-output', className="mt-4 pb-5")
+    ],
+    style={"marginLeft": "25%", "padding": "2rem 3rem", "maxWidth": "1200px"}
+)
 
-    st.session_state.setdefault("extracted_metadata", None)
-    st.session_state.setdefault("pdf_file", None)
-    st.session_state.setdefault("meta_edit_doi", "")
-    st.session_state.setdefault("meta_edit_abstract", "")
-    st.session_state.setdefault("meta_is_correct", False)
-    st.session_state.setdefault("authors_is_correct", False)
-
-    def add_author():
-        st.session_state.auteurs.append({"surname": "", "name": "", "email": ""})
-
-    def remove_author(index: int):
-        if index < len(st.session_state.auteurs):
-            st.session_state.auteurs.pop(index)
-
-    # Sidebar
-    with st.sidebar:
-        logo_uri = load_svg_as_data_uri("eupha-logo.svg")
-        if logo_uri:
-            st.markdown(
-                f'<img class="sidebar-logo" src="{logo_uri}" style="width: 100%; max-width: 220px; height:auto;">',
-                unsafe_allow_html=True,
-            )
-        st.markdown("### EU Fact Force")
-        st.markdown("---")
-        st.markdown("**How it works**")
-        st.markdown(
-            "1) Upload a PDF\n"
-            "2) Validate DOI + abstract\n"
-            "3) Validate authors\n"
-            "4) Click **Upload file**"
-        )
-
-    st.title("EU Fact Force - Article uploading page")
-    st.write("## Welcome to EU Fact Force articles uploading pages")
-    st.write("")
-    st.write(
-        "##### Thank you for collaborating with us, you will find here a page where you can"
-        " upload and declare authors of your papers in attempt to build a safer and healthier community! "
-        "Thank you for your contribution!"
-    )
-
-    st.write("")
-    st.title("Upload & Metadatas")
-
-    # Upload section
-    uploaded_file = st.file_uploader(
-        label="Please drop your article here ! (Please make sure it's a PDF file!)",
-        type="pdf",
-        help=(
-            "The maximum file size is set by the server.maxUploadSize configuration option "
-            "in your config.toml file."
-        ),
-    )
-
-    if not uploaded_file:
-        st.info("Upload a PDF to continue.")
-        return
-
-    # Extract metadata from PDF if it's a new file
-    if uploaded_file.name != st.session_state.pdf_file:
-        st.session_state.pdf_file = uploaded_file.name
-        st.session_state.meta_is_correct = False
-        st.session_state.authors_is_correct = False
-        st.session_state.meta_edit_doi = ""
-        st.session_state.meta_edit_abstract = ""
-        st.session_state.auteurs = []
-        
-        with st.spinner("Extracting metadata from PDF..."):
-            st.session_state.extracted_metadata = extract_pdf_metadata(uploaded_file)
-        
-        # Initialize with extracted data
-        extracted_doi = st.session_state.extracted_metadata.get("doi")
-        extracted_abstract = st.session_state.extracted_metadata.get("abstract")
-        extracted_authors = st.session_state.extracted_metadata.get("authors", [])
-        
-        if extracted_doi:
-            st.session_state.meta_edit_doi = extracted_doi
-        if extracted_abstract:
-            st.session_state.meta_edit_abstract = extracted_abstract
-        if extracted_authors:
-            st.session_state.auteurs = extracted_authors
-        
-        st.success("Metadata extracted from PDF! ✨")
-
-    st.success(f"{uploaded_file.name} have been submitted to our database!")
-    st.write("##### Please share some key informations about the article with us!")
-
-    # Metadata section
-    st.write("")
-    st.header("General informations")
-
-    extracted_doi = st.session_state.extracted_metadata.get("doi") if st.session_state.extracted_metadata else None
-    extracted_abstract = st.session_state.extracted_metadata.get("abstract") if st.session_state.extracted_metadata else None
-
-    col_doi, col_status = st.columns([3, 1])
-    with col_doi:
-        st.text_input(
-            "Please share DOI", 
-            value=st.session_state.meta_edit_doi,
-            key="meta_doi_input",
-            disabled=st.session_state.meta_is_correct,
-            on_change=lambda: setattr(st.session_state, 'meta_edit_doi', st.session_state.meta_doi_input),
-            placeholder="ex: 10.1038/s41586-021-00000-x"
-        )
-        if extracted_doi:
-            st.caption(f"✨ Extracted from PDF: {extracted_doi}")
-    
-    with col_status:
-        if st.session_state.meta_is_correct:
-            st.success("✓ Locked")
-        else:
-            st.info("Editable")
-
-    st.text_area(
-        "Please share your abstract", 
-        value=st.session_state.meta_edit_abstract,
-        key="meta_abstract_input",
-        height=150,
-        disabled=st.session_state.meta_is_correct,
-        on_change=lambda: setattr(st.session_state, 'meta_edit_abstract', st.session_state.meta_abstract_input),
-        placeholder="Lorem ipsum dolor sit amet"
-    )
-    if extracted_abstract:
-        st.caption("✨ Extracted from PDF (may be truncated)")
-
-    st.write("")
-    
-    col_check, col_space = st.columns([2, 3])
-    with col_check:
-        st.checkbox(
-            "This information is correct",
-            value=st.session_state.meta_is_correct,
-            key="meta_is_correct",
-            help="Check this box to lock the fields and confirm the data is correct"
-        )
-    
-    if st.session_state.meta_is_correct:
-        st.success("✓ Metadata validated and locked.")
-    else:
-        st.info("💡 You can still edit the fields above.")
-
-    # Authors section
-    st.write("")
-    st.header("Authors")
-
-    if len(st.session_state.auteurs) == 0:
-        st.info("No authors found. Click the button below to add one.")
-    #afficher la liste bruts des auteurs extraits du pdf
-    
-    st.write(st.session_state.auteurs)
-    for i in range(len(st.session_state.auteurs)):
-        with st.expander(f"Author n°{i+1}", expanded=True):
-            col_delete, col_info = st.columns([1, 4])
-            
-            with col_delete:
-                if not st.session_state.authors_is_correct:
-                    if st.button("Remove", key=f"remove_author_{i}"):
-                        remove_author(i)
-                        st.rerun()
-            
-            # with col_info:
-            #     if st.session_state.auteurs[i].get("name") or st.session_state.auteurs[i].get("surname"):
-            #         st.caption(f"Name: {st.session_state.auteurs[i].get('name', '')} | Surname: {st.session_state.auteurs[i].get('surname', '')}")
-            
-            c1, c2 = st.columns(2)
-            with c1:
-                name_val = st.text_input(
-                    "Name", 
-                    value=st.session_state.auteurs[i].get("name", ""),
-                    key=f"name_{i}",
-                    disabled=st.session_state.authors_is_correct
-                )
-                st.session_state.auteurs[i]["name"] = name_val
-            
-            with c2:
-                surname_val = st.text_input(
-                    "Surname", 
-                    value=st.session_state.auteurs[i].get("surname", ""),
-                    key=f"surname_{i}",
-                    disabled=st.session_state.authors_is_correct
-                )
-                st.session_state.auteurs[i]["surname"] = surname_val
-
-            is_corr = st.checkbox(
-                "Is corresponding author ?", 
-                key=f"corr_{i}",
-                disabled=st.session_state.authors_is_correct
-            )
-            if is_corr:
-                email_val = st.text_input(
-                    "Corresponding author e-mail", 
-                    value=st.session_state.auteurs[i].get("email", ""),
-                    key=f"email_{i}",
-                    disabled=st.session_state.authors_is_correct,
-                    placeholder='institutional@mail.edu'
-                )
-                st.session_state.auteurs[i]["email"] = email_val
-
-    st.write("")
-    
-    if not st.session_state.authors_is_correct:
-        if st.button("➕ Add an author", on_click=add_author):
-            pass
-
-    st.write("")
-    col_check_auth, col_space_auth = st.columns([2, 3])
-    
-    with col_check_auth:
-        st.checkbox(
-            "Authors information is correct",
-            value=st.session_state.authors_is_correct,
-            key="authors_is_correct",
-            help="Check this box to lock the authors list and confirm the data is correct"
-        )
-    
-    if st.session_state.authors_is_correct:
-        st.success(f"✓ {len(st.session_state.auteurs)} author(s) validated and locked.")
-    else:
-        st.info("💡 You can still edit, add, or remove authors.")
-
-    st.divider()
-
-    # Upload metadatas section
-    if st.button("Upload file", type="primary"):
-        if not st.session_state.meta_is_correct:
-            st.error("❌ Please validate the metadata (DOI and abstract) before uploading.")
-        elif not st.session_state.authors_is_correct:
-            st.error("❌ Please validate the authors list before uploading.")
-        elif len(st.session_state.auteurs) == 0:
-            st.error("❌ Please add at least one author before uploading.")
-        else:
-            # Build final JSON
-            authors_dict = {}
-            for j, author in enumerate(st.session_state.auteurs):
-                authors_dict[f"author_{j+1}"] = {
-                    "name": author.get("name", ""),
-                    "surname": author.get("surname", ""),
-                    "email": author.get("email") or None,
-                }
-
-            final_json = {
-                "doi": st.session_state.meta_edit_doi,
-                "abstract": st.session_state.meta_edit_abstract,
-                "authors": authors_dict
-            }
-
-            st.success("Successfully contributed, thank you!")
-            st.json(final_json)
+app.layout = html.Div([
+    dcc.Store(id='session-store', data={}),
+    sidebar,
+    main_content
+], style={"fontFamily": "system-ui, -apple-system, sans-serif"})
 
 
-if __name__ == "__main__":
-    main()
+def creer_ligne_auteur(index, name="", surname="", email=""):
+    return dbc.Card([
+        dbc.CardBody([
+            dbc.Row([
+                dbc.Col(dbc.Input(id={'type': 'auth-name', 'index': index}, value=name, placeholder="Name"), width=3),
+                dbc.Col(dbc.Input(id={'type': 'auth-surname', 'index': index}, value=surname, placeholder="Surname"), width=4),
+                dbc.Col(dbc.Input(id={'type': 'auth-email', 'index': index}, value=email, placeholder="Email (Corresponding)"), width=4),
+                dbc.Col(dbc.Button("Remove", id={'type': 'remove-author', 'index': index}, color="danger", outline=True, className="w-100"), width=1)
+            ], className="align-items-center")
+        ], className="p-2")
+    ], className="mb-3 border-light shadow-sm")
+
+
+# --- CALLBACKS ---
+
+@app.callback(
+    Output('input-doi', 'value'),
+    Output('input-abstract', 'value'),
+    Output('session-store', 'data'),
+    Input('upload-pdf', 'contents')
+)
+def handle_pdf_upload(contents):
+    if contents is None:
+        return dash.no_update, dash.no_update, {}
+
+    # Décodage et appel de votre fonction existante
+    content_type, content_string = contents.split(',')
+    decoded = base64.b64decode(content_string)
+
+    # Appel de votre fonction : extract_pdf_metadata
+    metadata = extract_pdf_metadata(io.BytesIO(decoded))
+
+    return metadata.get('doi', ''), metadata.get('abstract', ''), metadata
+
+@app.callback(
+    Output('authors-container', 'children'),
+    Input('btn-add-author', 'n_clicks'),
+    Input({'type': 'remove-author', 'index': ALL}, 'n_clicks'),
+    Input('session-store', 'data'),
+    State({'type': 'auth-name', 'index': ALL}, 'value'),
+    State({'type': 'auth-surname', 'index': ALL}, 'value'),
+    State({'type': 'auth-email', 'index': ALL}, 'value'),
+    State({'type': 'auth-name', 'index': ALL}, 'id'),
+)
+def update_authors_list(add_clicks, remove_clicks, metadata, names, surnames, emails, ids):
+    triggered = ctx.triggered_id
+
+    # On new PDF load
+    if triggered == 'session-store' and metadata:
+        authors = metadata.get('authors', [])
+        return [creer_ligne_auteur(str(uuid.uuid4()), a.get('name', ''), a.get('surname', ''), a.get('email', '')) for a in authors]
+
+    # Reconstruct current list of authors from states
+    current_authors = []
+    if ids:
+        for idx_id, name, surname, email in zip(ids, names, surnames, emails):
+            current_authors.append({
+                'index': idx_id['index'],
+                'name': name or "",
+                'surname': surname or "",
+                'email': email or ""
+            })
+
+    if triggered == 'btn-add-author':
+        current_authors.append({
+            'index': str(uuid.uuid4()),
+            'name': "",
+            'surname': "",
+            'email': ""
+        })
+
+    if isinstance(triggered, dict) and triggered.get('type') == 'remove-author':
+        remove_index = triggered.get('index')
+        current_authors = [a for a in current_authors if a['index'] != remove_index]
+
+    return [creer_ligne_auteur(a['index'], a['name'], a['surname'], a['email']) for a in current_authors]
+
+
+@app.callback(
+    Output('input-doi', 'disabled'),
+    Output('input-abstract', 'disabled'),
+    Input('chk-meta-correct', 'value')
+)
+def lock_metadata(is_correct):
+    return bool(is_correct), bool(is_correct)
+
+
+@app.callback(
+    Output({'type': 'auth-name', 'index': ALL}, 'disabled'),
+    Output({'type': 'auth-surname', 'index': ALL}, 'disabled'),
+    Output({'type': 'auth-email', 'index': ALL}, 'disabled'),
+    Output({'type': 'remove-author', 'index': ALL}, 'disabled'),
+    Output('btn-add-author', 'disabled'),
+    Input('chk-authors-correct', 'value'),
+    State({'type': 'auth-name', 'index': ALL}, 'id')
+)
+def lock_authors(is_correct, ids):
+    is_corr = bool(is_correct)
+    if not ids:
+        return [], [], [], [], is_corr
+    length = len(ids)
+    return [is_corr]*length, [is_corr]*length, [is_corr]*length, [is_corr]*length, is_corr
+
+
+@app.callback(
+    Output('final-output', 'children'),
+    Input('btn-final-upload', 'n_clicks'),
+    State('input-doi', 'value'),
+    State('input-abstract', 'value'),
+    State({'type': 'auth-name', 'index': ALL}, 'value'),
+    State({'type': 'auth-surname', 'index': ALL}, 'value'),
+    State({'type': 'auth-email', 'index': ALL}, 'value'),
+    prevent_initial_call=True
+)
+def finalize_and_display_json(n_clicks, doi, abstract, names, surnames, emails):
+
+    authors_list = [
+        {"name": n, "surname": s, "email": e}
+        for n, s, e in zip(names, surnames, emails) if n or s
+    ]
+
+    metadata_json = {
+        "doi": doi,
+        "abstract": abstract,
+        "authors": authors_list
+    }
+
+    return html.Div([
+        dbc.Alert("Successfully contributed, thank you!", color="success"),
+        html.H4("Metadata JSON"),
+        html.Pre(json.dumps(metadata_json, indent=4), style={'backgroundColor': '#f8f9fa', 'padding': '15px', 'borderRadius': '8px', 'border': '1px solid #dee2e6'})
+    ])
+
+
+if __name__ == '__main__':
+    app.run(debug=True, port=8050)
