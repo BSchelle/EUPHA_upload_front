@@ -169,7 +169,7 @@ app.layout = dbc.Container([
 
     html.Hr(),
     dbc.Button("Upload file", id='btn-final-upload', color="primary", size="lg"),
-    html.Div(id='final-output') # Pour le JSON final ou le graphe Cytoscape
+    html.Div(id='final-output', className="mt-4")
 ], fluid=True)
 
 @app.callback(
@@ -217,32 +217,39 @@ def update_authors_list(n_clicks, metadata, current_children):
 def creer_ligne_auteur(index, name="", surname=""):
     return dbc.Card([
         dbc.Row([
-            dbc.Col(dbc.Input(id={'type': 'auth-name', 'index': index}, value=name)),
-            dbc.Col(dbc.Input(id={'type': 'auth-surname', 'index': index}, value=surname)),
+            dbc.Col(dbc.Input(id={'type': 'auth-name', 'index': index}, value=name), width=6),
+            dbc.Col(dbc.Input(id={'type': 'auth-surname', 'index': index}, value=surname), width=6),
         ])
     ], className="mb-2 p-2")
 
 @app.callback(
-    Output('cytoscape-graph', 'elements'), # Si votre graphe est sur la page
+    Output('final-output', 'children'),
     Input('btn-final-upload', 'n_clicks'),
     State('input-doi', 'value'),
+    State('input-abstract', 'value'),
     State({'type': 'auth-name', 'index': ALL}, 'value'),
     State({'type': 'auth-surname', 'index': ALL}, 'value'),
     prevent_initial_call=True
 )
-def finalize_and_plot(n_clicks, doi, names, surnames):
-    # Créer les nouveaux nœuds pour Cytoscape
-    new_elements = []
-    # Créer le nœud "Article"
-    new_elements.append({'data': {'id': doi, 'label': f"Article: {doi}"}})
+def finalize_and_display_json(n_clicks, doi, abstract, names, surnames):
+    import json
 
-    # Créer les nœuds "Auteurs" et les liens
-    for n, s in zip(names, surnames):
-        auth_id = f"{n}_{s}"
-        new_elements.append({'data': {'id': auth_id, 'label': f"{n} {s}"}})
-        new_elements.append({'data': {'source': auth_id, 'target': doi}})
+    authors_list = [
+        {"name": n, "surname": s}
+        for n, s in zip(names, surnames) if n or s
+    ]
 
-    return new_elements
+    metadata_json = {
+        "doi": doi,
+        "abstract": abstract,
+        "authors": authors_list
+    }
+
+    return html.Div([
+        html.H4("Metadata JSON"),
+        html.Pre(json.dumps(metadata_json, indent=4), style={'backgroundColor': '#f8f9fa', 'padding': '10px'}),
+        html.H4("Authors JSON", className="mt-3")
+        ])
 
 
 if __name__ == '__main__':
