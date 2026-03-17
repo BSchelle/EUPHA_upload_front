@@ -5,7 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "fitz>=0.0.1.dev2",
+    "dash>=4.0.0",
+    "dash-bootstrap-components>=2.0.4",
     "pdfplumber>=0.11.8",
     "pymupdf>=1.26.5",
     "pytest>=8.4.2",
