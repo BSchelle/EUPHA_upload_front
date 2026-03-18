@@ -187,9 +187,27 @@ def extract_text_by_blocks(uploaded_file_bytes) -> str:
             full_text += block[4] + "\n"
     return full_text
 
+def extract_title_from_pdf(text: str) -> Optional[str]:
+    """Try to extract the title from the first few lines of the PDF."""
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    if not lines:
+        return None
+
+    # Typically the title is in the first few lines, is not too long,
+    # and doesn't contain certain keywords.
+    for line in lines[:10]:
+        # Skip lines that are likely not titles (e.g., journal names, DOI, authors)
+        if any(kw in line.lower() for kw in ["journal", "doi:", "http", "vol.", "issn", "received:", "accepted:", "copyright"]):
+            continue
+        # Titles are usually at least 3 words and not excessively long (e.g. < 250 chars)
+        if 3 <= len(line.split()) <= 40 and len(line) < 450:
+            return line
+    return None
+
 def extract_pdf_metadata(uploaded_file) -> dict:
     """Extract metadata from PDF file."""
     metadata = {
+        "title": None,
         "doi": None,
         "abstract": None,
         "publication_date": None,
@@ -202,6 +220,7 @@ def extract_pdf_metadata(uploaded_file) -> dict:
         pdf_text = extract_text_by_blocks(uploaded_file.read())
 
         # Extract metadata
+        metadata["title"] = extract_title_from_pdf(pdf_text)
         metadata["doi"] = extract_doi_from_pdf(pdf_text)
         metadata["abstract"] = extract_abstract_from_pdf(pdf_text)
         metadata["authors"] = extract_authors_from_pdf(pdf_text)
@@ -212,7 +231,6 @@ def extract_pdf_metadata(uploaded_file) -> dict:
     except Exception as e:
         print(f"Error processing PDF: {e}")
     return metadata
-
 # Dash components
 
 logo_uri = load_svg_as_data_uri("eupha-logo.svg")
@@ -264,19 +282,44 @@ main_content = html.Div(
                 html.H5("General informations", className="mt-4 font-weight-bold"),
                 dbc.Row([
                     dbc.Col([
-                        dbc.Label("File Type"),
-                        dcc.Dropdown(
-                            id='input-file-type',
-                            options=[
-                                {'label': 'Scientific Article', 'value': 'scientific_article'},
-                                {'label': 'Report', 'value': 'report'},
-                                {'label': 'Thesis', 'value': 'thesis'},
-                                {'label': 'Working Paper', 'value': 'working_paper'},
-                                {'label': 'Other', 'value': 'other'}
-                            ],
-                            value='scientific_article',
-                            className="mb-3"
-                        ),
+                        dbc.Label("Article Title"),
+                        dbc.Input(id='input-title', type='text', placeholder="Title of the article", className="mb-3"),
+
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Label("Category"),
+                                dcc.Dropdown(
+                                    id='input-category',
+                                    options=[
+                                        {'label': 'Scientific Article', 'value': 'scientific_article'},
+                                        {'label': 'Report', 'value': 'report'},
+                                        {'label': 'Thesis', 'value': 'thesis'},
+                                        {'label': 'Working Paper', 'value': 'working_paper'},
+                                        {'label': 'Book Chapter', 'value': 'book_chapter'},
+                                        {'label': 'Other', 'value': 'other'}
+                                    ],
+                                    value='scientific_article',
+                                    className="mb-3"
+                                ),
+                            ], width=6),
+                            dbc.Col([
+                                dbc.Label("Study Type"),
+                                dcc.Dropdown(
+                                    id='input-type',
+                                    options=[
+                                        {'label': 'Meta-analysis', 'value': 'meta_analysis'},
+                                        {'label': 'Systematic review', 'value': 'systematic_review'},
+                                        {'label': 'Evidence review', 'value': 'evidence_review'},
+                                        {'label': 'Cohort study', 'value': 'cohort_study'},
+                                        {'label': 'Case-control study', 'value': 'case_control_study'},
+                                        {'label': 'Cross-sectional study', 'value': 'cross_sectional_study'},
+                                        {'label': 'Randomized controlled trial', 'value': 'rct'},
+                                        {'label': 'Other', 'value': 'other'}
+                                    ],
+                                    className="mb-3"
+                                ),
+                            ], width=6),
+                        ]),
                         dbc.Label("Journal / Source"),
                         dbc.Input(id='input-journal', type='text', placeholder="ex: The Lancet Public Health", className="mb-3"),
 
@@ -347,12 +390,13 @@ def creer_ligne_auteur(index, name="", surname="", email=""):
     Output('input-journal', 'value'),
     Output('input-date', 'value'),
     Output('input-link', 'value'),
+    Output('input-title', 'value'),
     Output('session-store', 'data'),
     Input('upload-pdf', 'contents')
 )
 def handle_pdf_upload(contents):
     if contents is None:
-        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, {}
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, {}
 
     # Décodage et appel de votre fonction existante
     content_type, content_string = contents.split(',')
@@ -367,9 +411,9 @@ def handle_pdf_upload(contents):
         metadata.get('journal', ''),
         metadata.get('publication_date', ''),
         metadata.get('article_link', ''),
+        metadata.get('title', ''),
         metadata
     )
-
 @app.callback(
     Output('authors-container', 'children'),
     Input('btn-add-author', 'n_clicks'),
@@ -420,12 +464,14 @@ def update_authors_list(add_clicks, remove_clicks, metadata, names, surnames, em
     Output('input-journal', 'disabled'),
     Output('input-date', 'disabled'),
     Output('input-link', 'disabled'),
-    Output('input-file-type', 'disabled'),
+    Output('input-category', 'disabled'),
+    Output('input-type', 'disabled'),
+    Output('input-title', 'disabled'),
     Input('chk-meta-correct', 'value')
 )
 def lock_metadata(is_correct):
     val = bool(is_correct)
-    return val, val, val, val, val, val
+    return val, val, val, val, val, val, val, val
 
 
 @app.callback(
@@ -453,13 +499,15 @@ def lock_authors(is_correct, ids):
     State('input-journal', 'value'),
     State('input-date', 'value'),
     State('input-link', 'value'),
-    State('input-file-type', 'value'),
+    State('input-category', 'value'),
+    State('input-type', 'value'),
+    State('input-title', 'value'),
     State({'type': 'auth-name', 'index': ALL}, 'value'),
     State({'type': 'auth-surname', 'index': ALL}, 'value'),
     State({'type': 'auth-email', 'index': ALL}, 'value'),
     prevent_initial_call=True
 )
-def finalize_and_display_json(n_clicks, doi, abstract, journal, date, link, file_type, names, surnames, emails):
+def finalize_and_display_json(n_clicks, doi, abstract, journal, date, link, category, study_type, title, names, surnames, emails):
 
     authors_list = [
         {"name": n, "surname": s, "email": e}
@@ -467,9 +515,11 @@ def finalize_and_display_json(n_clicks, doi, abstract, journal, date, link, file
     ]
 
     metadata_json = {
-        "file_type": file_type,
+        "title": title,
+        "category": category,
+        "study_type": study_type,
         "journal": journal,
-        "publication_date": date,
+        "publication_year": date,
         "doi": doi,
         "article_link": link,
         "abstract": abstract,
