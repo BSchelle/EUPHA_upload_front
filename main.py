@@ -291,8 +291,8 @@ main_content = html.Div(
                             ], width=6),
                         ], className="mb-3"),
 
-                        dbc.Label("Article Link"),
-                        dbc.Input(id='input-link', type='text', placeholder="https://doi.org/...", className="mb-3"),
+                        dbc.Label("Publication URL"),
+                        dbc.Input(id='input-link', type='text', placeholder="https://pubmed.ncbi.nlm.nih.gov/...", className="mb-3"),
 
                         dbc.Label("Abstract"),
                         dbc.Textarea(id='input-abstract', style={'height': 150}, placeholder="Lorem ipsum dolor sit amet"),
