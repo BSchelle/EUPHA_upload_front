@@ -343,7 +343,7 @@ main_content = html.Div(
             ],
             style={
                 "maxWidth": "1100px",
-                "margin": "0 auto 2rem auto"  
+                "margin": "0 auto 2rem auto"
             }
         ),
 
