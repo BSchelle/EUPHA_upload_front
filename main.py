@@ -237,46 +237,137 @@ logo_uri = load_svg_as_data_uri("eupha-logo.svg")
 
 sidebar = html.Div(
     [
-        html.Img(src=logo_uri, style={"width": "100%", "maxWidth": "220px", "height": "auto", "display": "block", "margin": "8px auto 20px auto"}) if logo_uri else html.Div(),
-        html.H3("EU Fact Force", className="text-center font-weight-bold"),
-        html.Hr(),
-        html.H5("How it works", className="mb-3 font-weight-bold"),
-        html.Ol([
-            html.Li("Upload a PDF"),
-            html.Li("Validate DOI + abstract"),
-            html.Li("Validate authors"),
-            html.Li("Click Upload file")
-        ], className="pl-3")
+        html.Div(
+            [
+                html.Img(
+                    src=logo_uri,
+                    style={
+                        "width": "100%",
+                        "maxWidth": "220px",
+                        "height": "auto",
+                        "display": "block",
+                        "margin": "0 auto 20px auto",
+                        "marginTop": "40px"
+                    }
+                ) if logo_uri else html.Div(),
+
+                html.H3(
+                    "EU Fact Force",
+                    className="text-center",
+                    style={
+                        "fontWeight": "700",
+                        "fontSize": "1.9rem",
+                        "marginBottom": "20px",
+                        "color": "#212529"
+                    }
+                ),
+
+                html.Hr(style={"margin": "1.2rem 0"}),
+
+                html.H5(
+                    "How it works",
+                    style={
+                        "fontWeight": "500",
+                        "marginBottom": "12px",
+                        "marginTop": "45px"
+                    }
+                ),
+
+                html.Ol(
+                    [
+                        html.Li("Upload a PDF"),
+                        html.Li("Validate DOI + abstract"),
+                        html.Li("Validate authors"),
+                        html.Li("Click Upload file")
+                    ],
+                    style={
+                        "paddingLeft": "1.2rem",
+                        "marginLeft": "0",
+                        "lineHeight": "1.8"
+                    }
+                ),
+            ],
+            style={
+                "maxWidth": "240px",
+                "margin": "0 auto"
+            }
+        )
     ],
     style={
         "padding": "2rem 1rem",
-        "backgroundColor": "#f8f9fa",
+        "backgroundColor": "#f5f7fa",
         "height": "100vh",
         "position": "fixed",
         "top": 0,
         "left": 0,
-        "width": "25%",
+        "width": "16%",
         "borderRight": "1px solid #dee2e6"
     }
 )
 
 main_content = html.Div(
     [
-        html.H1("EU Fact Force - Article uploading page", className="mb-2"),
-        html.H3("Welcome to EU Fact Force articles uploading pages", className="text-muted mb-4"),
-        html.P("Thank you for collaborating with us, you will find here a page where you can upload and declare authors of your papers in attempt to build a safer and healthier community! Thank you for your contribution!"),
+        # 🔹 HEADER CENTRÉ PROPRE
+        html.Div(
+            [
+                html.H1(
+                    "EU Fact Force - Article uploading page",
+                    className="mb-3 text-center",
+                    style={
+                        "fontWeight": "700",
+                        "fontSize": "2.5rem",
+                        "lineHeight": "1.15"
+                    }
+                ),
+                html.H3(
+                    "Welcome to EU Fact Force articles uploading pages",
+                    className="text-center mb-4",
+                    style={
+                        "color": "#6c757d",
+                        "fontWeight": "500",
+                        "fontSize": "1.5rem",
+                        "lineHeight": "1.3"
+                    }
+                ),
+                html.P(
+                    "Thank you for collaborating with us, you will find here a page where you can upload and declare authors of your papers in attempt to build a safer and healthier community! Thank you for your contribution!",
+                    className="text-center mb-5",
+                    style={
+                        "maxWidth": "900px",
+                        "margin": "0 auto",
+                        "fontSize": "1.1rem",
+                        "lineHeight": "1.7",
+                        "color": "#212529"
+                    }
+                ),
+            ],
+            style={
+                "maxWidth": "1100px",
+                "margin": "0 auto 2rem auto"  
+            }
+        ),
 
         dbc.Card([
             dbc.CardBody([
-                html.H4("Upload & Metadatas", className="card-title font-weight-bold mb-4"),
+                html.H4(
+                    "Upload & Metadatas",
+                    className="card-title font-weight-bold mb-4"
+                ),
                 dcc.Upload(
                     id='upload-pdf',
                     children=html.Div(['Drop your article here or ', html.A('Select a PDF', className="font-weight-bold")]),
                     style={
-                        'width': '100%', 'height': '80px', 'lineHeight': '80px',
-                        'borderWidth': '2px', 'borderStyle': 'dashed', 'borderColor': '#adb5bd',
-                        'textAlign': 'center', 'borderRadius': '10px', 'marginBottom': '20px',
-                        'backgroundColor': '#f8f9fa', 'cursor': 'pointer'
+                        'width': '100%',
+                        'height': '80px',
+                        'lineHeight': '80px',
+                        'borderWidth': '2px',
+                        'borderStyle': 'dashed',
+                        'borderColor': '#adb5bd',
+                        'textAlign': 'center',
+                        'borderRadius': '10px',
+                        'marginBottom': '20px',
+                        'backgroundColor': '#f8f9fa',
+                        'cursor': 'pointer'
                     }
                 ),
                 html.H5("General informations", className="mt-4 font-weight-bold"),
@@ -348,36 +439,102 @@ main_content = html.Div(
 
         dbc.Card([
             dbc.CardBody([
-                html.H4("Authors", className="card-title font-weight-bold mb-4"),
+                html.H4(
+                    "Authors",
+                    className="card-title font-weight-bold mb-4"
+                ),
                 html.Div(id='authors-container'),
-                dbc.Button("➕ Add an author", id='btn-add-author', n_clicks=0, color="info", outline=True, className="mt-3"),
+                dbc.Button(
+                    "➕ Add an author",
+                    id='btn-add-author',
+                    n_clicks=0,
+                    outline=True,
+                    className="mt-3",
+                    style={
+                        "color": "#3B6096",
+                        "borderColor": "#3B6096",
+                        "borderRadius": "10px",
+                        "fontWeight": "500"
+                    }
+                ),
                 html.Br(),
                 dbc.Checkbox(id='chk-authors-correct', label="Authors information is correct", className="mt-3 font-weight-bold text-success"),
             ])
         ], className="mb-4 shadow-sm", style={"borderRadius": "16px"}),
 
-        dbc.Button("Upload file", id='btn-final-upload', color="primary", size="lg", className="w-100 mb-4"),
+        dbc.Button(
+            "Upload file",
+            id='btn-final-upload',
+            size="lg",
+            className="w-100 mb-4",
+            style={
+                "backgroundColor": "#3B6096",
+                "borderColor": "#3B6096",
+                "color": "white",
+                "fontWeight": "600",
+                "borderRadius": "10px"
+            }
+        ),
+
         html.Div(id='final-output', className="mt-4 pb-5")
     ],
-    style={"marginLeft": "25%", "padding": "2rem 3rem", "maxWidth": "1200px"}
+    style={
+        "marginLeft": "16%",
+        "padding": "5rem 1.5rem 2rem 1.5rem",
+        "width": "84%",
+        "backgroundColor": "#ffffff"
+    }
 )
-
 app.layout = html.Div([
     dcc.Store(id='session-store', data={}),
     sidebar,
     main_content
-], style={"fontFamily": "system-ui, -apple-system, sans-serif"})
+], style={"fontFamily": "system-ui, -apple-system, sans-serif", "backgroundColor": "#f5f7fa"})
 
 
 def creer_ligne_auteur(index, name="", surname="", email=""):
     return dbc.Card([
         dbc.CardBody([
             dbc.Row([
-                dbc.Col(dbc.Input(id={'type': 'auth-name', 'index': index}, value=name, placeholder="Name"), width=3),
-                dbc.Col(dbc.Input(id={'type': 'auth-surname', 'index': index}, value=surname, placeholder="Surname"), width=4),
-                dbc.Col(dbc.Input(id={'type': 'auth-email', 'index': index}, value=email, placeholder="Email (Corresponding)"), width=4),
-                dbc.Col(dbc.Button("Remove", id={'type': 'remove-author', 'index': index}, color="danger", outline=True, className="w-100"), width=1)
-            ], className="align-items-center")
+                dbc.Col(
+                    dbc.Input(
+                        id={'type': 'auth-name', 'index': index},
+                        value=name,
+                        placeholder="Name"
+                    ),
+                    width=3
+                ),
+                dbc.Col(
+                    dbc.Input(
+                        id={'type': 'auth-surname', 'index': index},
+                        value=surname,
+                        placeholder="Surname"
+                    ),
+                    width=3
+                ),
+                dbc.Col(
+                    dbc.Input(
+                        id={'type': 'auth-email', 'index': index},
+                        value=email,
+                        placeholder="Email (Corresponding)"
+                    ),
+                    width=4
+                ),
+                dbc.Col(
+                    dbc.Button(
+                        "Remove",
+                        id={'type': 'remove-author', 'index': index},
+                        color="danger",
+                        outline=True,
+                        className="w-100",
+                        style={
+                            "whiteSpace": "nowrap",
+                            "minWidth": "100px"
+                        }
+                    ),
+                    width=2
+                )
+            ], className="align-items-center g-2")
         ], className="p-2")
     ], className="mb-3 border-light shadow-sm")
 
