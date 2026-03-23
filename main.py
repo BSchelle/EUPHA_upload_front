@@ -1,4 +1,5 @@
 from __future__ import annotations
+from email.mime import text
 import dash  # L'import de la vraie librairie
 from dash import dcc, html, Input, Output, State, ALL, ctx
 import dash_bootstrap_components as dbc
@@ -117,6 +118,64 @@ def extract_authors_from_pdf(text: str) -> list[dict]:
 
     return authors[:10]
 
+def extract_date_from_pdf(text: str) -> Optional[str]:
+    """Extract publication date (year only) from PDF text."""
+    # YYYY-MM-DD or YYYY/MM/DD
+    match = re.search(r'\b((?:19|20)\d{2})[-/.](?:0[1-9]|1[012])[-/.](?:0[1-9]|[12][0-9]|3[01])\b', text)
+    if match:
+        return match.group(1)
+
+    # DD-MM-YYYY or DD/MM/YYYY
+    match = re.search(r'\b(?:0[1-9]|[12][0-9]|3[01])[-/.](?:0[1-9]|1[012])[-/.]((?:19|20)\d{2})\b', text)
+
+    # Pattern: Month Year (e.g., "January 2023")
+    match = re.search(r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+((?:19|20)\d{2})\b', text, re.IGNORECASE)
+    if match:
+        return match.group(1)
+
+    # We look for years typically appearing in headers or near "Copyright" or "Received"
+    # Just a year (between 1900 and 2099)
+    match = re.search(r'\b(19\d{2}|20\d{2})\b', text)
+    if match:
+        return match.group(1)
+
+    return None
+
+def extract_journal_from_pdf(text: str) -> Optional[str]:
+    """Extract journal name from PDF text."""
+    journal_patterns = [
+        r'Published in\s*[:]?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)',
+        r'Journal of\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)',
+        r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\s+Journal)',
+        r'Source\s*[:]?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)'
+    ]
+    for pattern in journal_patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip()
+
+    # Try to find it in the first few lines if not found by pattern
+    lines = text.split('\n')[:15]
+    for line in lines:
+        line = line.strip()
+        if any(kw in line for kw in ["Journal", "Review", "Nature", "Science", "Lancet", "Medicine"]):
+            if len(line.split()) < 10: # Avoid long sentences
+                return line
+    return None
+
+def extract_link_from_pdf(text: str, doi: Optional[str] = None) -> Optional[str]:
+    """Extract article link from PDF text or DOI."""
+    if doi:
+        return f"https://doi.org/{doi}"
+
+    # Look for https links that might be the editor's link
+    links = re.findall(r'https?://(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-z]{2,6}\b(?:[-a-zA-Z0-9@:%_\+.~#?&//=]*)', text)
+    for link in links:
+        if any(domain in link for domain in ['sciencedirect', 'springer', 'wiley', 'nature.com', 'thelancet', 'bmj', 'frontiersin', 'plos', 'pubmed.ncbi.nlm.nih.gov'\
+            , 'who.int', 'cdc.gov', 'acpjournals', 'nejm.org', 'jama.jamanetwork.com']):
+            return link
+    return links[0] if links else None
+
 def extract_text_by_blocks(uploaded_file_bytes) -> str:
     doc = fitz.open(stream=uploaded_file_bytes, filetype="pdf")
     full_text = ""
@@ -128,23 +187,51 @@ def extract_text_by_blocks(uploaded_file_bytes) -> str:
             full_text += block[4] + "\n"
     return full_text
 
+def extract_title_from_pdf(text: str) -> Optional[str]:
+    """Try to extract the title from the first few lines of the PDF."""
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    if not lines:
+        return None
+
+    # Typically the title is in the first few lines, is not too long,
+    # and doesn't contain certain keywords.
+    for line in lines[:10]:
+        # Skip lines that are likely not titles (e.g., journal names, DOI, authors)
+        if any(kw in line.lower() for kw in ["journal", "doi:", "http", "vol.", "issn", "received:", "accepted:", "copyright"]):
+            continue
+        # Titles are usually at least 3 words and not excessively long (e.g. < 250 chars)
+        if 3 <= len(line.split()) <= 40 and len(line) < 450:
+            return line
+    return None
+
 def extract_pdf_metadata(uploaded_file) -> dict:
     """Extract metadata from PDF file."""
-    metadata = {"doi": None, "abstract": None, "authors": []}
+    metadata = {
+        "title": None,
+        "doi": None,
+        "abstract": None,
+        "publication_date": None,
+        "journal": None,
+        "article_link": None,
+        "authors": []
+    }
     try:
         # Extract text from PDF
         pdf_text = extract_text_by_blocks(uploaded_file.read())
 
         # Extract metadata
+        metadata["title"] = extract_title_from_pdf(pdf_text)
         metadata["doi"] = extract_doi_from_pdf(pdf_text)
         metadata["abstract"] = extract_abstract_from_pdf(pdf_text)
         metadata["authors"] = extract_authors_from_pdf(pdf_text)
+        metadata["publication_date"] = extract_date_from_pdf(pdf_text)
+        metadata["journal"] = extract_journal_from_pdf(pdf_text)
+        metadata["article_link"] = extract_link_from_pdf(pdf_text, metadata["doi"])
 
     except Exception as e:
         print(f"Error processing PDF: {e}")
     return metadata
-
-# --- LAYOUT COMPONENTS ---
+# Dash components
 
 logo_uri = load_svg_as_data_uri("eupha-logo.svg")
 
@@ -256,7 +343,7 @@ main_content = html.Div(
             ],
             style={
                 "maxWidth": "1100px",
-                "margin": "0 auto 2rem auto"  
+                "margin": "0 auto 2rem auto"
             }
         ),
 
@@ -286,10 +373,64 @@ main_content = html.Div(
                 html.H5("General informations", className="mt-4 font-weight-bold"),
                 dbc.Row([
                     dbc.Col([
-                        dbc.Label("Please share DOI"),
-                        dbc.Input(id='input-doi', type='text', placeholder="ex: 10.1038/s41586-021-00000-x"),
-                        dbc.Label("Please share your abstract", className="mt-3"),
+                        dbc.Label("Article Title"),
+                        dbc.Input(id='input-title', type='text', placeholder="Title of the article", className="mb-3"),
+
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Label("Category"),
+                                dcc.Dropdown(
+                                    id='input-category',
+                                    options=[
+                                        {'label': 'Scientific Article', 'value': 'scientific_article'},
+                                        {'label': 'Report', 'value': 'report'},
+                                        {'label': 'Thesis', 'value': 'thesis'},
+                                        {'label': 'Working Paper', 'value': 'working_paper'},
+                                        {'label': 'Book Chapter', 'value': 'book_chapter'},
+                                        {'label': 'Other', 'value': 'other'}
+                                    ],
+                                    value='scientific_article',
+                                    className="mb-3"
+                                ),
+                            ], width=6),
+                            dbc.Col([
+                                dbc.Label("Study Type"),
+                                dcc.Dropdown(
+                                    id='input-type',
+                                    options=[
+                                        {'label': 'Meta-analysis', 'value': 'meta_analysis'},
+                                        {'label': 'Systematic review', 'value': 'systematic_review'},
+                                        {'label': 'Evidence review', 'value': 'evidence_review'},
+                                        {'label': 'Cohort study', 'value': 'cohort_study'},
+                                        {'label': 'Case-control study', 'value': 'case_control_study'},
+                                        {'label': 'Cross-sectional study', 'value': 'cross_sectional_study'},
+                                        {'label': 'Randomized controlled trial', 'value': 'rct'},
+                                        {'label': 'Other', 'value': 'other'}
+                                    ],
+                                    className="mb-3"
+                                ),
+                            ], width=6),
+                        ]),
+                        dbc.Label("Journal / Source"),
+                        dbc.Input(id='input-journal', type='text', placeholder="ex: The Lancet Public Health", className="mb-3"),
+
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Label("Publication Year"),
+                                dbc.Input(id='input-date', type='text', placeholder="ex: 2023"),
+                            ], width=6),
+                            dbc.Col([
+                                dbc.Label("DOI"),
+                                dbc.Input(id='input-doi', type='text', placeholder="ex: 10.1038/s41586-021-00000-x"),
+                            ], width=6),
+                        ], className="mb-3"),
+
+                        dbc.Label("Publication URL"),
+                        dbc.Input(id='input-link', type='text', placeholder="https://pubmed.ncbi.nlm.nih.gov/...", className="mb-3"),
+
+                        dbc.Label("Abstract"),
                         dbc.Textarea(id='input-abstract', style={'height': 150}, placeholder="Lorem ipsum dolor sit amet"),
+
                         dbc.Checkbox(id='chk-meta-correct', label="This information is correct", className="mt-3 font-weight-bold text-success"),
                     ], width=12)
                 ]),
@@ -403,12 +544,16 @@ def creer_ligne_auteur(index, name="", surname="", email=""):
 @app.callback(
     Output('input-doi', 'value'),
     Output('input-abstract', 'value'),
+    Output('input-journal', 'value'),
+    Output('input-date', 'value'),
+    Output('input-link', 'value'),
+    Output('input-title', 'value'),
     Output('session-store', 'data'),
     Input('upload-pdf', 'contents')
 )
 def handle_pdf_upload(contents):
     if contents is None:
-        return dash.no_update, dash.no_update, {}
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, {}
 
     # Décodage et appel de votre fonction existante
     content_type, content_string = contents.split(',')
@@ -417,8 +562,15 @@ def handle_pdf_upload(contents):
     # Appel de votre fonction : extract_pdf_metadata
     metadata = extract_pdf_metadata(io.BytesIO(decoded))
 
-    return metadata.get('doi', ''), metadata.get('abstract', ''), metadata
-
+    return (
+        metadata.get('doi', ''),
+        metadata.get('abstract', ''),
+        metadata.get('journal', ''),
+        metadata.get('publication_date', ''),
+        metadata.get('article_link', ''),
+        metadata.get('title', ''),
+        metadata
+    )
 @app.callback(
     Output('authors-container', 'children'),
     Input('btn-add-author', 'n_clicks'),
@@ -466,10 +618,17 @@ def update_authors_list(add_clicks, remove_clicks, metadata, names, surnames, em
 @app.callback(
     Output('input-doi', 'disabled'),
     Output('input-abstract', 'disabled'),
+    Output('input-journal', 'disabled'),
+    Output('input-date', 'disabled'),
+    Output('input-link', 'disabled'),
+    Output('input-category', 'disabled'),
+    Output('input-type', 'disabled'),
+    Output('input-title', 'disabled'),
     Input('chk-meta-correct', 'value')
 )
 def lock_metadata(is_correct):
-    return bool(is_correct), bool(is_correct)
+    val = bool(is_correct)
+    return val, val, val, val, val, val, val, val
 
 
 @app.callback(
@@ -494,12 +653,18 @@ def lock_authors(is_correct, ids):
     Input('btn-final-upload', 'n_clicks'),
     State('input-doi', 'value'),
     State('input-abstract', 'value'),
+    State('input-journal', 'value'),
+    State('input-date', 'value'),
+    State('input-link', 'value'),
+    State('input-category', 'value'),
+    State('input-type', 'value'),
+    State('input-title', 'value'),
     State({'type': 'auth-name', 'index': ALL}, 'value'),
     State({'type': 'auth-surname', 'index': ALL}, 'value'),
     State({'type': 'auth-email', 'index': ALL}, 'value'),
     prevent_initial_call=True
 )
-def finalize_and_display_json(n_clicks, doi, abstract, names, surnames, emails):
+def finalize_and_display_json(n_clicks, doi, abstract, journal, date, link, category, study_type, title, names, surnames, emails):
 
     authors_list = [
         {"name": n, "surname": s, "email": e}
@@ -507,7 +672,13 @@ def finalize_and_display_json(n_clicks, doi, abstract, names, surnames, emails):
     ]
 
     metadata_json = {
+        "title": title,
+        "category": category,
+        "study_type": study_type,
+        "journal": journal,
+        "publication_year": date,
         "doi": doi,
+        "article_link": link,
         "abstract": abstract,
         "authors": authors_list
     }
